@@ -17,11 +17,59 @@ import json
 import os
 from typing import TYPE_CHECKING, Any
 
+from pydantic import model_validator
+from vllm.config import config
 from vllm.logger import logger
 from vllm.utils.math_utils import cdiv
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
+
+
+@config
+class LeapQuantConfig:
+    """Configuration for ``additional_config["leapquant_config"]``.
+
+    LeapQuant (arXiv 2609.38166, RFC vllm-ascend#21097) quantizes the
+    recurrent state of linear-attention layers (GDN) at *window
+    boundaries* only: within a window the state stays fp32, and every
+    ``window`` tokens it is round-tripped through an int8 checkpoint with
+    ``compensator_tokens`` low-rank compensators and smoothed two-scale
+    residual quantization. Default-off; enabling it trades a small
+    boundary-flush cost for near-fp32 accuracy at a fraction of the state
+    bandwidth (the storage saving lands with the fused-kernel milestone).
+
+    Cross-option mutex checks (spec decoding, mamba prefix caching, PD
+    disaggregation, C8 KV quantization, FULL cudagraph) run in
+    ``AscendConfig._check_leapquant_config``.
+    """
+
+    enabled: bool = False
+    # Tokens per quantization window. The paper's optimum is 16 for 8-bit.
+    window: int = 16
+    # Number of compensator tokens (top-r singular pairs kept out of int8).
+    # The paper uses r = 4 at 8-bit.
+    compensator_tokens: int = 4
+    # State checkpoint bit width. Only int8 is implemented (PR1).
+    bits: int = 8
+
+    @model_validator(mode="after")
+    def _validate(self):
+        if self.window not in (8, 16, 32, 64):
+            raise ValueError(f"leapquant_config.window must be one of (8, 16, 32, 64); got {self.window}")
+        if not 1 <= self.compensator_tokens <= 8:
+            raise ValueError(
+                f"leapquant_config.compensator_tokens must be between 1 and 8; got {self.compensator_tokens}"
+            )
+        if self.bits != 8:
+            raise ValueError(f"leapquant_config.bits supports only 8 in this milestone; got {self.bits}")
+        return self
+
+    @property
+    def summary(self) -> str:
+        return (
+            f"LeapQuant enabled: window={self.window}, compensator_tokens={self.compensator_tokens}, bits={self.bits}"
+        )
 
 
 class AscendConfig:
@@ -33,6 +81,8 @@ class AscendConfig:
         self.vllm_config = vllm_config
         additional_config = vllm_config.additional_config if vllm_config.additional_config is not None else {}
         self._check_mooncake_c8_kv_cache_quant(vllm_config)
+        self.leapquant_config = LeapQuantConfig(**additional_config.get("leapquant_config", {}))
+        self._check_leapquant_config(vllm_config)
 
         xlite_graph_config = additional_config.get("xlite_graph_config", {})
         self.xlite_graph_config = XliteGraphConfig(xlite_graph_config, vllm_config)
@@ -389,6 +439,53 @@ class AscendConfig:
             "Mooncake transfer would reinterpret bf16 bytes as int8. Please disable C8 KV cache quantization "
             "or use MooncakeLayerwiseConnector, which quantizes KV cache before transfer."
         )
+
+    def _check_leapquant_config(self, vllm_config: "VllmConfig") -> None:
+        """Cross-option mutex checks for LeapQuant (RFC vllm-ascend#21097, M1).
+
+        The window flush assumes one token per decode step and an fp32
+        state-pool layout; every feature below breaks one of those
+        assumptions and is rejected at startup instead of failing silently.
+        """
+        if not self.leapquant_config.enabled:
+            return
+
+        vc = vllm_config
+        # The runtime checks the hardware family in the worker at the first flush.
+        if vc.speculative_config is not None:
+            raise ValueError(
+                "leapquant_config does not support speculative decoding yet: the number of "
+                "accepted tokens varies per step, so decode steps can cross window boundaries "
+                "mid-step. Please disable speculative decoding."
+            )
+        mamba_cache_mode = getattr(vc.cache_config, "mamba_cache_mode", "none")
+        if mamba_cache_mode == "align":
+            raise ValueError(
+                "leapquant_config does not support mamba prefix caching (mamba_cache_mode="
+                "'align'): rollback can restore a state that is in the middle of a "
+                "quantization window. Please keep mamba_cache_mode='none'."
+            )
+        kv_transfer_config = getattr(vc, "kv_transfer_config", None)
+        if kv_transfer_config is not None and getattr(kv_transfer_config, "kv_connector", None):
+            raise ValueError(
+                "leapquant_config does not support PD disaggregation yet: the KV/state "
+                "transfer assumes the fp32 state layout. Please disable kv_transfer."
+            )
+        quant_config = getattr(vc, "quant_config", None)
+        if getattr(quant_config, "enable_c8_quant", False):
+            raise ValueError(
+                "leapquant_config cannot be combined with C8 KV cache quantization in this "
+                "milestone. Please disable one of them."
+            )
+        compilation_config = getattr(vc, "compilation_config", None)
+        cudagraph_mode = getattr(compilation_config, "cudagraph_mode", None)
+        if cudagraph_mode is not None and cudagraph_mode.has_full_cudagraphs():
+            raise ValueError(
+                "leapquant_config does not support FULL cudagraph capture: the window-boundary "
+                "flush is data-dependent host logic inside the attention custom op. Please use "
+                "piecewise/eager cudagraph modes."
+            )
+        logger.info(self.leapquant_config.summary)
 
     def _check_mix_placement(self):
         if self.mix_placement:
@@ -942,3 +1039,17 @@ def get_ascend_config():
     if _ASCEND_CONFIG is None or not _is_ascend_config_initialized(_ASCEND_CONFIG):
         raise RuntimeError("Ascend config is not initialized. Please call init_ascend_config first.")
     return _ASCEND_CONFIG
+
+
+def leapquant_config_or_none() -> LeapQuantConfig | None:
+    """Return the enabled LeapQuantConfig, or None when disabled/uninitialized.
+
+    Attention layers and metadata builders use this helper. A
+    missing AscendConfig singleton (CPU unit tests) degrades to "disabled".
+    """
+    try:
+        config = get_ascend_config()
+    except RuntimeError:
+        return None
+    leapquant = config.leapquant_config
+    return leapquant if leapquant.enabled else None

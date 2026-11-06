@@ -27,6 +27,7 @@ from vllm.v1.attention.backend import AttentionBackend, AttentionMetadata  # typ
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
 from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 
+from vllm_ascend.ascend_config import leapquant_config_or_none
 from vllm_ascend.attention.utils import maybe_save_kv_layer_to_connector
 from vllm_ascend.device.device_op import DeviceOperator
 from vllm_ascend.ops.gdn_attn_builder import AscendGDNAttentionBackend
@@ -437,6 +438,22 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
             ).unsqueeze(0)
         else:
             core_attn_out_non_spec, last_recurrent_state = None, None
+
+        # Flush GDN state after the recurrent update or prefill writeback.
+        leapquant_config = leapquant_config_or_none()
+        if (
+            leapquant_config is not None
+            and non_spec_state_indices_tensor is not None
+            and (leapquant_seq_lens := getattr(attn_metadata, "leapquant_seq_lens", None)) is not None
+        ):
+            from vllm_ascend.quantization.methods.mamba_state.leapquant import leapquant_flush_state_rows
+
+            leapquant_flush_state_rows(
+                ssm_state,
+                non_spec_state_indices_tensor[: leapquant_seq_lens.numel()],
+                leapquant_seq_lens,
+                config=leapquant_config,
+            )
 
         # 3. Merge core attention output
         if spec_sequence_masks is not None and core_attn_out_non_spec is not None:

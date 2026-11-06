@@ -154,6 +154,27 @@ python -m vllm.entrypoints.api_server \
     --trust-remote-code 
 ```
 
+## LeapQuant Recurrent-State Quantization
+
+LeapQuant ([arXiv 2609.38166](https://arxiv.org/abs/2609.38166)) quantizes the recurrent state of GDN layers online during inference. On a token-window boundary, it encodes the state as a small FP16 low-rank compensator plus int8 residual codes, then reconstructs the state in the original floating-point pool. Chunked prefill can flush only when a chunk ends on a window boundary.
+
+Enable it through `additional_config`; no offline step or modified checkpoint is needed:
+
+```bash
+vllm serve Qwen/Qwen3.5-9B --enforce-eager --additional-config '{
+  "leapquant_config": {"enabled": true, "window": 16, "compensator_tokens": 4}
+}'
+```
+
+Current scope:
+
+- **Hardware**: Atlas A3 only.
+- **Models**: GDN hybrid models such as Qwen3.5-0.8B and Qwen3.5-9B.
+- **Tuning knobs**: `window` (8/16/32/64), `compensator_tokens` (rank 1–8), see the [`leapquant_config` reference](../configuration/additional_config.md#leapquant_config). `window=16, compensator_tokens=4` matches the paper.
+- **Incompatible with**: speculative decoding, PD-disaggregation KV connectors, C8 KV cache quantization, aligned Mamba cache mode, and FULL graph mode (use `NONE` or `PIECEWISE`). Invalid combinations are rejected at startup.
+
+The first release is a pure torch-npu implementation focused on correctness; fused triton-ascend kernels are planned as a follow-up.
+
 ## References
 
 - [ModelSlim GitCode](https://gitcode.com/Ascend/msmodelslim)

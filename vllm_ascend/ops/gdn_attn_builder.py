@@ -33,6 +33,7 @@ from vllm.v1.attention.backends.utils import (
 )
 from vllm.v1.kv_cache_interface import AttentionSpec
 
+from vllm_ascend.ascend_config import leapquant_config_or_none
 from vllm_ascend.ops.triton.fla.utils import (
     prepare_chunk_indices,
     prepare_chunk_offsets,
@@ -887,6 +888,9 @@ class AscendGDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
         attn_metadata = self._attach_spec_decode_metadata(
             attn_metadata,
         )
+        if leapquant_config_or_none() is not None and m.seq_lens_cpu_upper_bound is not None:
+            # Without speculative decoding, the upper bound is the post-step sequence length.
+            attn_metadata.leapquant_seq_lens = m.seq_lens_cpu_upper_bound[: num_decodes + num_prefills]
         return self._attach_non_spec_decode_metadata(
             attn_metadata,
             non_spec_conv1d_cache_indices,

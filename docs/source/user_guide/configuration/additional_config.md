@@ -102,6 +102,7 @@ The following table lists additional configuration options available in vLLM Asc
 | `enable_transpose_kv_cache_by_block`| bool | `True`  | Whether to enable transpose KV cache by block. Can also be configured via the `VLLM_ASCEND_FUSION_OP_TRANSPOSE_KV_CACHE_BY_BLOCK` environment variable during the migration period. |
 | `enable_dsa_cp`                     | bool | `False` | Whether to enable dsa_cp for DeepSeek V3.2, DeepSeek V4, and other models with the same architecture. This feature depends on FlashComm1. Please ensure that FlashComm1 is enabled before enabling this feature.|
 | `rejection_sampler_config`          | dict | `{}`    | Configuration options for rejection sampler (block verify and entropy verify). |
+| `leapquant_config`                  | dict | `{}`    | Configuration options for LeapQuant online recurrent-state (GDN) quantization. See <a href="#leapquant_config">leapquant_config</a> and the [quantization guide](../feature_guide/quantization.md#leapquant-recurrent-state-quantization). |
 | `multistream_dsv4_dsa_overlap`      | bool | `True`  | Whether to enable dsa multi-stream overlap for DeepSeek V4.  |
 | `enable_reduce_sample`              | bool | `False` | Whether to enable reduce sample optimization to reduce communication and computation overheads in the tensor parallelism scenario. When enabled, logits are kept partitioned across TP ranks and only the small set of top-k candidate values/indices is communicated, instead of performing a full-vocabulary all-to-all/all-gather. **Note**: This is an experimental feature. **Limitations**: (1) Not supported on PD-disaggregated scenario. (2) Must be disabled when sampling logprobs are requested. When reduce sample is enabled, logprobs are silently computed over partitioned logits instead of the full vocabulary, producing incorrect logprob values and top-k rankings. (3) Cannot be enabled together with lmhead TP.|
 
@@ -140,6 +141,27 @@ The details of each configuration option are as follows:
 | `fuse_qknorm_rope` | bool | `True` | Whether to enable fuse_qknorm_rope pass. If Triton is not in the environment, set it to False. |
 | `fuse_allreduce_rms` | bool | `False` | Whether to enable fuse_allreduce_rms pass. It's set to False because of conflict with SP. |
 | `fuse_muls_add` | bool | `True` | Whether to enable fuse_muls_add pass.|
+
+**leapquant_config**
+
+LeapQuant ([arXiv 2609.38166](https://arxiv.org/abs/2609.38166)) applies an int8 round trip to the recurrent state of GDN layers at token-window boundaries. This implementation keeps the state pool in its original floating-point layout. Hardware support is limited to Atlas A3.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `enabled` | bool | `False` | Whether to enable LeapQuant recurrent-state quantization. |
+| `window` | int | `16` | Number of tokens between two state flushes. One of `8`, `16`, `32`, `64`. |
+| `compensator_tokens` | int | `4` | Rank `r` of the high-precision (fp16) low-rank compensator kept outside the int8 codes. `1`–`8`; `4` matches the paper. |
+| `bits` | int | `8` | Code width. Only `8` (int8) is supported in this version. |
+
+Example:
+
+```bash
+vllm serve Qwen/Qwen3.5-9B --enforce-eager --additional-config '{
+  "leapquant_config": {"enabled": true, "window": 16, "compensator_tokens": 4}
+}'
+```
+
+Enabling LeapQuant requires: Atlas A3, a GDN hybrid model such as Qwen3.5, graph mode `NONE` or `PIECEWISE`, and non-aligned Mamba cache mode. It is rejected at startup together with speculative decoding, PD-disaggregation KV connectors, or C8 KV cache quantization.
 
 **eplb_config**
 
