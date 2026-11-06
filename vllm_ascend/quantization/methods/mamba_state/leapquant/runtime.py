@@ -33,20 +33,20 @@ def _check_device_once() -> None:
     global _device_gate_checked
     if _device_gate_checked:
         return
-    _device_gate_checked = True
     from vllm_ascend.utils import AscendDeviceType, get_ascend_device_type
 
     try:
         device_type = get_ascend_device_type()
     except Exception:
         # No resolvable Ascend device (e.g. CPU-only CI running unit tests);
-        # a real serve always resolves, so only fire the gate when it does.
+        # leave the gate unset and retry the lookup on the next flush.
         return
     if device_type != AscendDeviceType.A3:
         raise RuntimeError(
             "leapquant_config is validated on Atlas A3 only in this milestone; "
             "please disable leapquant_config on this device."
         )
+    _device_gate_checked = True
 
 
 def leapquant_flush_state_rows(
@@ -58,12 +58,13 @@ def leapquant_flush_state_rows(
 ) -> None:
     """Re-quantize the state rows whose sequence just crossed a window boundary.
 
-    The scheduler orders requests decodes-first, and ``seq_lens`` counts the
-    tokens processed *after* this step's query, so the window-boundary
-    condition is simply ``seq_len % window == 0`` for both decode and prefill
-    rows.  The flush runs once per step, only on due rows, and leaves the
-    pool layout intact (fp32 in, fp32 out — the storage-side checkpoint lands
-    with the fused-kernel milestone).
+    The scheduler orders requests decodes-first. The post-step sequence
+    length must be positive and divisible by the window size. The flush
+    keeps the state pool in its original floating-point layout.
+
+    The prefill kernel only materializes the state at the end of each
+    chunk. Prefill flushes therefore occur at boundary-aligned chunk ends.
+    Decode processes one token per request and flushes at each boundary.
 
     Args:
         state: state pool ``[slots, H, V, K]`` (may have a padded batch stride).

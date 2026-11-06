@@ -12,6 +12,7 @@ from vllm_ascend.ascend_config import LeapQuantConfig
 from vllm_ascend.quantization.methods.mamba_state.leapquant import (
     leapquant_config_or_none,
     leapquant_flush_state_rows,
+    runtime,
 )
 
 
@@ -61,6 +62,22 @@ class TestLeapQuantRuntime(unittest.TestCase):
         leapquant_flush_state_rows(view, indices, seq_lens, config=self.config)
         self.assertFalse(bool((view[2] != before[2]).any()))  # 31 % 16 != 0
         self.assertTrue(bool((view[4] != before[4]).any()))  # 48 % 16 == 0
+
+    def test_device_gate_retries_until_a3_is_confirmed(self):
+        devices = MagicMock(A2=object(), A3=object())
+        detect = MagicMock(side_effect=[RuntimeError("device unavailable"), devices.A2, devices.A2, devices.A3])
+        utils = MagicMock(AscendDeviceType=devices, get_ascend_device_type=detect)
+        with (
+            patch.dict("sys.modules", {"vllm_ascend.utils": utils}),
+            patch.object(runtime, "_device_gate_checked", False),
+        ):
+            runtime._check_device_once()
+            for _ in range(2):
+                with self.assertRaisesRegex(RuntimeError, "Atlas A3 only"):
+                    runtime._check_device_once()
+            runtime._check_device_once()
+            runtime._check_device_once()
+        self.assertEqual(detect.call_count, 4)
 
     def test_config_or_none_degrades_without_singleton(self):
         with patch(
