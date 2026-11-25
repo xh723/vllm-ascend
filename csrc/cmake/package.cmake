@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------------------------------------
 #### CPACK to package run #####
 
-# download makeself package
+# Resolve the local packaging tool.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/third_party/makeself-fetch.cmake)
 
 # mc2_matmul KB install

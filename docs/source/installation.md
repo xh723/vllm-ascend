@@ -264,6 +264,8 @@ pip uninstall -y triton-ascend triton
 To build custom operators, gcc/g++ higher than 8 and C++17 or higher are required. If you are using `pip install -e .` and encounter a TorchNPU version conflict, please install with `pip install --no-build-isolation -e .` to build on system env.
 If you encounter other problems during compiling, it is probably because an unexpected compiler is being used, you may export `CXX_COMPILER` and `C_COMPILER` in the environment to specify your g++ and gcc locations before compiling.
 
+The custom operator packager uses a local makeself copy if available and otherwise uses the version included in the checkout. Makeself requires no network access. For an offline editable install with all build and runtime dependencies already available, run `python -m pip install --no-index --no-build-isolation --no-deps -e .`. Prepare the CATLASS submodule and any other CANN build dependencies before going offline.
+
 If you are building in a CPU-only environment where `npu-smi` is unavailable, you need to set `SOC_VERSION` before `pip install -e .` so the build can target the correct chip. You can refer to `Dockerfile*` defaults, for example:
 
 - Atlas A2: `export SOC_VERSION=ascend910b1`

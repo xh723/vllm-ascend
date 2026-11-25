@@ -5,7 +5,8 @@ default_install_hook_types:
 default_stages:
   - pre-commit # Run locally
   - manual # Run in CI
-exclude: '^(\.agents|\.claude|\.gemini)/.*'
+# Preserve upstream makeself sources and license verbatim.
+exclude: '^(?:(\.agents|\.claude|\.gemini)/.*|csrc/cmake/third_party/makeself/(COPYING|makeself(-header)?\.sh)$)'
 
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit

@@ -1,0 +1,3 @@
+# Preserve the release files byte for byte.
+COPYING -text
+*.sh -text -whitespace
