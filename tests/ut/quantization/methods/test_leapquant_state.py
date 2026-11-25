@@ -68,6 +68,13 @@ class TestLeapQuantState(unittest.TestCase):
         second = leap_window_flush(state, compensator_tokens=4)
         self.assertTrue(torch.equal(first, second))
 
+    def test_start_basis_ignores_default_device(self):
+        device = torch.device("cpu")
+        expected = start_basis(128, 4, device=device)
+        with torch.device("meta"):
+            actual = start_basis(128, 4, device=device)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
     def test_flush_preserves_shape_and_dtype(self):
         state = torch.randn(3, 5, 64, 48)
         flushed = leap_window_flush(state, compensator_tokens=4)

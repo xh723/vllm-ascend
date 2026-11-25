@@ -52,6 +52,8 @@ class LeapQuantConfig:
     compensator_tokens: int = 4
     # State checkpoint bit width. Only int8 is implemented (PR1).
     bits: int = 8
+    # Explicit opt-in for the experimental Atlas A2 path.
+    allow_experimental_a2: bool = False
 
     @model_validator(mode="after")
     def _validate(self):
@@ -68,7 +70,8 @@ class LeapQuantConfig:
     @property
     def summary(self) -> str:
         return (
-            f"LeapQuant enabled: window={self.window}, compensator_tokens={self.compensator_tokens}, bits={self.bits}"
+            f"LeapQuant enabled: window={self.window}, compensator_tokens={self.compensator_tokens}, "
+            f"bits={self.bits}, allow_experimental_a2={self.allow_experimental_a2}"
         )
 
 

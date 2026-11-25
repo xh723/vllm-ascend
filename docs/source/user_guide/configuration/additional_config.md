@@ -144,11 +144,12 @@ The details of each configuration option are as follows:
 
 **leapquant_config**
 
-LeapQuant ([arXiv 2609.38166](https://arxiv.org/abs/2609.38166)) applies an int8 round trip to the recurrent state of GDN layers at token-window boundaries. This implementation keeps the state pool in its original floating-point layout. Hardware support is limited to Atlas A3.
+LeapQuant ([arXiv 2609.38166](https://arxiv.org/abs/2609.38166)) applies an int8 round trip to the recurrent state of GDN layers at token-window boundaries. This implementation keeps the state pool in its original floating-point layout. Atlas A2 requires the experimental opt-in below.
 
 | Name | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `enabled` | bool | `False` | Whether to enable LeapQuant recurrent-state quantization. |
+| `allow_experimental_a2` | bool | `False` | Allow LeapQuant on Atlas A2, including Ascend 910B4, when `enabled` is also `True`. |
 | `window` | int | `16` | Number of tokens between two state flushes. One of `8`, `16`, `32`, `64`. |
 | `compensator_tokens` | int | `4` | Rank `r` of the high-precision (fp16) low-rank compensator kept outside the int8 codes. `1`–`8`; `4` matches the paper. |
 | `bits` | int | `8` | Code width. Only `8` (int8) is supported in this version. |
@@ -161,7 +162,7 @@ vllm serve Qwen/Qwen3.5-9B --enforce-eager --additional-config '{
 }'
 ```
 
-Enabling LeapQuant requires: Atlas A3, a GDN hybrid model such as Qwen3.5, graph mode `NONE` or `PIECEWISE`, and non-aligned Mamba cache mode. It is rejected at startup together with speculative decoding, PD-disaggregation KV connectors, or C8 KV cache quantization.
+Use a GDN hybrid model, graph mode `NONE` or `PIECEWISE`, and non-aligned Mamba cache mode. Startup rejects speculative decoding, PD-disaggregation KV connectors, and C8 KV cache quantization when LeapQuant is enabled. See the [quantization guide](../feature_guide/quantization.md#leapquant-recurrent-state-quantization) for an Atlas A2 launch example and the activation log.
 
 **eplb_config**
 

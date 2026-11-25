@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+from vllm.logger import logger
 
 from vllm_ascend.quantization.methods.mamba_state.leapquant.state import leap_window_flush
 
@@ -22,31 +23,23 @@ __all__ = [
     "leapquant_flush_state_rows",
 ]
 
-_device_gate_checked = False
 
+def _check_device(*, allow_experimental_a2: bool) -> None:
+    """Validate the worker's device family against the current opt-in.
 
-def _check_device_once() -> None:
-    """Fail fast on non-A3 devices at the first flush (worker process).
-
-    The worker has already initialized its NPU context at the first flush.
+    The device helper caches successful detection. Check the opt-in on each
+    call so an A2 run cannot authorize a later configuration in this worker.
     """
-    global _device_gate_checked
-    if _device_gate_checked:
-        return
     from vllm_ascend.utils import AscendDeviceType, get_ascend_device_type
 
     try:
         device_type = get_ascend_device_type()
     except Exception:
-        # No resolvable Ascend device (e.g. CPU-only CI running unit tests);
-        # leave the gate unset and retry the lookup on the next flush.
+        # The device helper retries detection on the next call.
         return
-    if device_type != AscendDeviceType.A3:
-        raise RuntimeError(
-            "leapquant_config is validated on Atlas A3 only in this milestone; "
-            "please disable leapquant_config on this device."
-        )
-    _device_gate_checked = True
+    if device_type == AscendDeviceType.A3 or (device_type == AscendDeviceType.A2 and allow_experimental_a2):
+        return
+    raise RuntimeError("LeapQuant requires Atlas A3, or Atlas A2 with leapquant_config.allow_experimental_a2=true.")
 
 
 def leapquant_flush_state_rows(
@@ -75,14 +68,22 @@ def leapquant_flush_state_rows(
     if state_indices.numel() == 0:
         return
     if state.device.type != "cpu":
-        _check_device_once()
+        _check_device(allow_experimental_a2=config.allow_experimental_a2)
     due = (seq_lens > 0) & (seq_lens % config.window == 0)
     due_rows = torch.nonzero(due, as_tuple=False).flatten()
     if due_rows.numel() == 0:
         return
 
-    rows = due_rows.to(state_indices.device)
+    rows = due_rows.to(device=state_indices.device, dtype=state_indices.dtype)
     slot_ids = state_indices.index_select(0, rows)
     # Use the same indexed state reads and writes as v0.23.0 GDN prefill.
     flushed = leap_window_flush(state[slot_ids], compensator_tokens=config.compensator_tokens)
     state[slot_ids] = flushed.to(state.dtype)
+    logger.info_once(
+        "LeapQuant GDN state flush submitted on %s (window=%d, compensator_tokens=%d, bits=%d).",
+        state.device,
+        config.window,
+        config.compensator_tokens,
+        config.bits,
+        scope="process",
+    )

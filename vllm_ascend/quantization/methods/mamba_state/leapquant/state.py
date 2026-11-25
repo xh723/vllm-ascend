@@ -69,7 +69,7 @@ def start_basis(v_dim: int, rank: int, *, device: torch.device, dtype: torch.dty
     """
     g = torch.Generator(device="cpu")
     g.manual_seed(_START_BASIS_SEED + 17 * v_dim + rank)
-    q0 = torch.randn(v_dim, rank, generator=g).to(dtype)
+    q0 = torch.randn(v_dim, rank, generator=g, device="cpu").to(dtype)
     q0, _ = torch.linalg.qr(q0)
     return q0.to(device=device, dtype=dtype).contiguous()
 

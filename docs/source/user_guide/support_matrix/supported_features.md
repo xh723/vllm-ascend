@@ -26,7 +26,7 @@ You can check the [support status of vLLM V1 Engine][v1_user_guide]. Below is th
 | Data Parallel                 | 🟢 Functional    | Data Parallel support for Qwen3 MoE.                                   |
 | Prefill Decode Disaggregation | 🟢 Functional    | Functional, xPyD is supported.                                         |
 | Quantization                  | 🟢 Functional    | W8A8 available; working on more quantization method support (W4A8, etc) |
-| LeapQuant State Quantization  | 🔵 Experimental  | Online GDN recurrent-state int8 quantization on A3 for GDN models such as Qwen3.5; see [Quantization guide](../feature_guide/quantization.md#leapquant-recurrent-state-quantization). |
+| LeapQuant State Quantization  | 🔵 Experimental  | Online GDN recurrent-state int8 quantization on Atlas A3 and opt-in Atlas A2. See the [quantization guide](../feature_guide/quantization.md#leapquant-recurrent-state-quantization). |
 | Graph Mode                    | 🟢 Functional    | Functional, see detailed note: [Graph Mode][graph_mode]                 |
 | Sleep Mode                    | 🟢 Functional    | Functional, see detailed note: [Sleep Mode][sleep_mode]                 |
 | Context Parallel              | 🟢 Functional    | Functional, see detailed note: [Context Parallel][context_parallel]     |

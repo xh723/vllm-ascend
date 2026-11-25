@@ -13,6 +13,7 @@ class TestLeapQuantConfig(unittest.TestCase):
     def test_defaults(self):
         config = LeapQuantConfig()
         self.assertFalse(config.enabled)
+        self.assertFalse(config.allow_experimental_a2)
         self.assertEqual(config.window, 16)
         self.assertEqual(config.compensator_tokens, 4)
         self.assertEqual(config.bits, 8)
@@ -23,6 +24,11 @@ class TestLeapQuantConfig(unittest.TestCase):
         self.assertEqual(config.window, 32)
         self.assertEqual(config.compensator_tokens, 2)
         self.assertIn("window=32", config.summary)
+
+    def test_atlas_a2_opt_in(self):
+        config = LeapQuantConfig(enabled=True, allow_experimental_a2=True)
+        self.assertTrue(config.allow_experimental_a2)
+        self.assertIn("allow_experimental_a2=True", config.summary)
 
     def test_window_choices(self):
         for window in (8, 16, 32, 64):

@@ -36,7 +36,9 @@ class TestLeapQuantRuntime(unittest.TestCase):
     def test_no_due_rows_is_noop(self):
         pool = torch.randn(4, 2, 16, 16)
         before = pool.clone()
-        leapquant_flush_state_rows(pool, torch.tensor([0, 1]), torch.tensor([5, 33]), config=self.config)
+        with patch.object(runtime.logger, "info_once") as activation_log:
+            leapquant_flush_state_rows(pool, torch.tensor([0, 1]), torch.tensor([5, 33]), config=self.config)
+        activation_log.assert_not_called()
         self.assertTrue(torch.equal(pool, before))
 
     def test_empty_indices(self):
@@ -63,21 +65,50 @@ class TestLeapQuantRuntime(unittest.TestCase):
         self.assertFalse(bool((view[2] != before[2]).any()))  # 31 % 16 != 0
         self.assertTrue(bool((view[4] != before[4]).any()))  # 48 % 16 == 0
 
-    def test_device_gate_retries_until_a3_is_confirmed(self):
+    def test_device_gate_retries_detection(self):
         devices = MagicMock(A2=object(), A3=object())
         detect = MagicMock(side_effect=[RuntimeError("device unavailable"), devices.A2, devices.A2, devices.A3])
         utils = MagicMock(AscendDeviceType=devices, get_ascend_device_type=detect)
-        with (
-            patch.dict("sys.modules", {"vllm_ascend.utils": utils}),
-            patch.object(runtime, "_device_gate_checked", False),
-        ):
-            runtime._check_device_once()
+        with patch.dict("sys.modules", {"vllm_ascend.utils": utils}):
+            runtime._check_device(allow_experimental_a2=False)
             for _ in range(2):
-                with self.assertRaisesRegex(RuntimeError, "Atlas A3 only"):
-                    runtime._check_device_once()
-            runtime._check_device_once()
-            runtime._check_device_once()
+                with self.assertRaisesRegex(RuntimeError, "Atlas A2 with leapquant_config.allow_experimental_a2=true"):
+                    runtime._check_device(allow_experimental_a2=False)
+            runtime._check_device(allow_experimental_a2=False)
         self.assertEqual(detect.call_count, 4)
+
+    def test_device_gate_requires_a2_opt_in_on_each_configuration(self):
+        devices = MagicMock(A2=object(), A3=object(), A5=object(), _310P=object())
+        detect = MagicMock(return_value=devices.A2)
+        utils = MagicMock(AscendDeviceType=devices, get_ascend_device_type=detect)
+        with patch.dict("sys.modules", {"vllm_ascend.utils": utils}):
+            runtime._check_device(allow_experimental_a2=True)
+            with self.assertRaisesRegex(RuntimeError, "allow_experimental_a2=true"):
+                runtime._check_device(allow_experimental_a2=False)
+            for device in (devices.A5, devices._310P):
+                detect.return_value = device
+                with self.assertRaisesRegex(RuntimeError, "requires Atlas A3"):
+                    runtime._check_device(allow_experimental_a2=True)
+
+    def test_activation_is_logged_after_state_writeback(self):
+        pool = torch.randn(4, 2, 16, 16)
+        original = pool[1].clone()
+
+        def check_state_written(*args, **kwargs):
+            self.assertFalse(torch.equal(pool[1], original))
+
+        with patch.object(runtime.logger, "info_once", side_effect=check_state_written) as activation_log:
+            leapquant_flush_state_rows(
+                pool, torch.tensor([1], dtype=torch.int32), torch.tensor([16]), config=self.config
+            )
+        activation_log.assert_called_once_with(
+            "LeapQuant GDN state flush submitted on %s (window=%d, compensator_tokens=%d, bits=%d).",
+            pool.device,
+            16,
+            4,
+            8,
+            scope="process",
+        )
 
     def test_config_or_none_degrades_without_singleton(self):
         with patch(
