@@ -17,8 +17,8 @@ import json
 import os
 from typing import TYPE_CHECKING, Any
 
-from pydantic import model_validator
-from vllm.config import config
+from pydantic import ConfigDict, model_validator
+from pydantic.dataclasses import dataclass
 from vllm.logger import logger
 from vllm.utils.math_utils import cdiv
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
 
-@config
+@dataclass(config=ConfigDict(extra="forbid"))
 class LeapQuantConfig:
     """Configuration for ``additional_config["leapquant_config"]``.
 

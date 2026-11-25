@@ -2,14 +2,25 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Unit tests for the LeapQuantConfig additional_config schema."""
 
+import runpy
 import unittest
+from types import ModuleType
+from unittest.mock import patch
 
 import pytest
 
+from vllm_ascend import ascend_config
 from vllm_ascend.ascend_config import LeapQuantConfig
 
 
 class TestLeapQuantConfig(unittest.TestCase):
+    def test_import_while_vllm_config_is_initializing(self):
+        with patch.dict("sys.modules", {"vllm.config": ModuleType("vllm.config")}):
+            module = runpy.run_path(ascend_config.__file__)
+            config = module["LeapQuantConfig"](enabled=True, allow_experimental_a2=True)
+        self.assertTrue(config.enabled)
+        self.assertTrue(config.allow_experimental_a2)
+
     def test_defaults(self):
         config = LeapQuantConfig()
         self.assertFalse(config.enabled)
